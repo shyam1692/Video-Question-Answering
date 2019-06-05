@@ -9,11 +9,14 @@ import torch.backends.cudnn as cudnn
 import torch.optim
 import numpy as np
 from torch.nn.utils import clip_grad_norm
+import string
 
 from dataset import TSNDataSet
 from models import TSN, SimpleLinear, FinalLayer
 from transforms import *
 from opts import parser
+from word_embedding import WordEmbedding
+
 import pandas as pd
 
 best_prec1 = 0
@@ -30,20 +33,9 @@ def main():
     #path files
     frames_path = args.frames_path
     optical_flow_path = args.optical_flow_path
+    word_embedding_file_path = args.word_embedding_file_path
+    test_train_combined_file = args.test_train_combined_file
     
-    """
-    if args.dataset == 'ucf101':
-        num_class = 101
-    elif args.dataset == 'hmdb51':
-        num_class = 51
-    elif args.dataset == 'kinetics':
-        num_class = 400
-    else:
-        raise ValueError('Unknown dataset '+args.dataset)
-    
-    above not needed
-    below to be modified
-    """
     #create 2 models, one for RGB, one for optical flow
     #optimizers for each model
     #model 3 will be tentatively for combining TSN vectors and bringing to 300 dimension to match Glove dimension
@@ -119,27 +111,31 @@ def main():
 
     #initializing all optimizers
     optimizer_rgb = torch.optim.SGD(policies_rgb,
-                                args.lr,
+                                lr = args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
 
     optimizer_flow = torch.optim.SGD(policies_flow,
-                                args.lr,
+                                lr = args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
 
-    optimizer_simple = torch.optim.SGD(
-                                args.lr,
+    optimizer_simple = torch.optim.SGD(simple_model.parameters(),
+                                lr = args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
     
-    optimizer_final_layer = torch.optim.SGD(
-                                args.lr,
+    optimizer_final_layer = torch.optim.SGD(final_layer_model.parameters(),
+                                lr = args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
-
+    
+    """Creating word embedding object"""
+    WordEmbedding_object = create_word_embedding_object(test_train_combined_file, word_embedding_file_path)
+    
     if args.evaluate:
-        validate(val_loader, model, criterion, 0)
+        validate(val_loader, model_rgb, model_flow, criterion, simple_model,
+             final_layer_model, WordEmbedding_object, 0)
         return
 
     for epoch in range(args.start_epoch, args.epochs):
@@ -147,15 +143,21 @@ def main():
         adjust_learning_rate(optimizer_flow, epoch, args.lr_steps)
 
         # train for one epoch
-        train(train_loader, model_rgb, model_flow, criterion, optimizer_rgb, optimizer_flow, simple_model,optimizer_simple, final_layer_model, optimizer_final_layer, epoch)
+        train(train_loader, model_rgb, model_flow, criterion, 
+              optimizer_rgb, optimizer_flow, simple_model,optimizer_simple, 
+              final_layer_model, optimizer_final_layer, WordEmbedding_object, epoch)
 
         # evaluate on validation set
         if (epoch + 1) % args.eval_freq == 0 or epoch == args.epochs - 1:
-            prec1 = validate(val_loader, model, criterion, (epoch + 1) * len(train_loader))
+            #prec1 = validate(val_loader, model, criterion, (epoch + 1) * len(train_loader))
+            prec1 = validate(val_loader, model_rgb, model_flow, criterion, simple_model,
+             final_layer_model, WordEmbedding_object, (epoch + 1) * len(train_loader))
 
             # remember best prec@1 and save checkpoint
             is_best = prec1 > best_prec1
             best_prec1 = max(prec1, best_prec1)
+            
+            """Need to modify save checkpoint code"""
             save_checkpoint({
                 'epoch': epoch + 1,
                 'arch': args.arch,
@@ -164,7 +166,9 @@ def main():
             }, is_best)
 
 #Right now, we haven't yet computer feature embeddings. We will focus on that later, first we will compute losses.
-def train(train_loader, model_rgb, model_flow, criterion, optimizer_rgb, optimizer_flow, simple_model, optimizer_simple, final_layer_model, optimizer_final_layer, epoch):
+def train(train_loader, model_rgb, model_flow, criterion, optimizer_rgb, 
+          optimizer_flow, simple_model, optimizer_simple, final_layer_model, 
+          optimizer_final_layer, WordEmbedding_object, epoch):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -181,6 +185,8 @@ def train(train_loader, model_rgb, model_flow, criterion, optimizer_rgb, optimiz
     # switch to train mode
     model_rgb.train()
     model_flow.train()
+    simple_model.train()
+    final_layer_model.train()
 
     end = time.time()
     for i, (input_questions,input_rgb, input_flow, target) in enumerate(train_loader):
@@ -188,7 +194,8 @@ def train(train_loader, model_rgb, model_flow, criterion, optimizer_rgb, optimiz
         data_time.update(time.time() - end)
 
         target = target.cuda(async=True)
-        
+        #Calling word embedding object to convert questions to glove vector tensors
+        QuestionEmbeddings = WordEmbedding_object(input_questions)
         #Do autograd transformation
         autograd_transform(input_rgb)
         autograd_transform(input_flow)
@@ -200,7 +207,8 @@ def train(train_loader, model_rgb, model_flow, criterion, optimizer_rgb, optimiz
         #output_TSN_reduced will be m*300 shape. We can run a trial on it and see.
         #Now we just take glove embeddings of questions
         #assume that we do have glove embeddings now. m*300. Thats the input_questions.
-        output_TSN_reduced *= input_questions
+        #We compute dot product.
+        output_TSN_reduced = output_TSN_reduced*QuestionEmbeddings
         #We have 156 softmax indices in total, from 0 to 155.
         output = final_layer_model(output_TSN_reduced)
         loss = criterion(output, target)
@@ -240,27 +248,38 @@ def train(train_loader, model_rgb, model_flow, criterion, optimizer_rgb, optimiz
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                   'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                    epoch, i, len(train_loader), batch_time=batch_time,
-                   data_time=data_time, loss=losses, top1=top1, top5=top5, lr=optimizer.param_groups[-1]['lr'])))
+                   data_time=data_time, loss=losses, top1=top1, top5=top5, lr=optimizer_rgb.param_groups[-1]['lr'])))
 
 
-def validate(val_loader, model, criterion, iter, logger=None):
+def validate(val_loader, model_rgb, model_flow, criterion, simple_model,
+             final_layer_model, WordEmbedding_object,iter, logger=None):
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
     top5 = AverageMeter()
 
     # switch to evaluate mode
-    model.eval()
+    model_rgb.eval()
+    model_flow.eval()
+    simple_model.eval()
+    final_layer_model.eval()
 
     end = time.time()
     for i, (input_questions,input_rgb, input_flow, target) in enumerate(val_loader):
         target = target.cuda(async=True)
-        input_var = torch.autograd.Variable(input, volatile=True)
-        target_var = torch.autograd.Variable(target, volatile=True)
+        QuestionEmbeddings = WordEmbedding_object(input_questions)
 
+        #Do autograd transformation
+        autograd_transform(input_rgb)
+        autograd_transform(input_flow)
+        autograd_transform(target)
         # compute output
-        output = model(input_var)
-        loss = criterion(output, target_var)
+        output_TSN = compute_video_features(model_rgb, model_flow, input_rgb, input_flow)    
+        output_TSN_reduced = simple_model(output_TSN)
+        output_TSN_reduced = output_TSN_reduced*QuestionEmbeddings
+        
+        output = final_layer_model(output_TSN_reduced)
+        loss = criterion(output, target)
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output.data, target, topk=(1,5))
@@ -400,6 +419,11 @@ def optimizers_zero_grad(*argv):
 def optimizers_step(*argv):
     for optimizer in argv:
         optimizer.step()
+
+def create_word_embedding_object(filename, embedding_file):
+    dataframe = read_file(filename)
+    series = dataframe['question']
+    return WordEmbedding(series, embedding_file)
 
 if __name__ == '__main__':
     main()
