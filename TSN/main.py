@@ -23,7 +23,8 @@ best_prec1 = 0
 
 
 def main():
-    global args, best_prec1
+    global args, best_prec1, model_paths_by_type_dictionary
+    model_paths_by_type_dictionary = define_ModelPaths()
     args = parser.parse_args()
     #args will contain filenames- trainsegment, testsegment, frames path, optical flow path
     #softmaxindex filename
@@ -35,7 +36,7 @@ def main():
     optical_flow_path = args.optical_flow_path
     word_embedding_file_path = args.word_embedding_file_path
     test_train_combined_file = args.test_train_combined_file
-    
+        
     #create 2 models, one for RGB, one for optical flow
     #optimizers for each model
     #model 3 will be tentatively for combining TSN vectors and bringing to 300 dimension to match Glove dimension
@@ -49,18 +50,9 @@ def main():
     final_layer_model = FinalLayer()
 
     if args.resume:
-        if os.path.isfile(args.resume):
-            print(("=> loading checkpoint '{}'".format(args.resume)))
-            checkpoint = torch.load(args.resume)
-            args.start_epoch = checkpoint['epoch']
-            best_prec1 = checkpoint['best_prec1']
-            model_rgb.load_state_dict(checkpoint['state_dict'])
-            model_flow.load_state_dict(checkpoint['state_dict'])
-            print(("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.evaluate, checkpoint['epoch'])))
-        else:
-            print(("=> no checkpoint found at '{}'".format(args.resume)))
-
+        for model in [model_rgb, model_flow, simple_model, final_layer_model]:
+            load_checkpoint(model)
+            
     cudnn.benchmark = True
 
     # Data loading code
@@ -157,18 +149,21 @@ def main():
             is_best = prec1 > best_prec1
             best_prec1 = max(prec1, best_prec1)
             
-            """Need to modify save checkpoint code"""
-            save_checkpoint({
-                'epoch': epoch + 1,
-                'arch': args.arch,
-                'state_dict': model.state_dict(),
-                'best_prec1': best_prec1,
-            }, is_best)
+            """Modified checkpoint code, model.arch not relevant for simplemodel and finallayermodel"""
+            for model in [model_rgb, model_flow, simple_model, final_layer_model]:
+                save_checkpoint({
+                    'epoch': epoch + 1,
+                    'arch': args.arch,
+                    'state_dict': model.state_dict(),
+                    'best_prec1': best_prec1,
+                }, is_best
+                , model.modality)
 
 #Right now, we haven't yet computer feature embeddings. We will focus on that later, first we will compute losses.
 def train(train_loader, model_rgb, model_flow, criterion, optimizer_rgb, 
           optimizer_flow, simple_model, optimizer_simple, final_layer_model, 
           optimizer_final_layer, WordEmbedding_object, epoch):
+    #global args
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -253,6 +248,7 @@ def train(train_loader, model_rgb, model_flow, criterion, optimizer_rgb,
 
 def validate(val_loader, model_rgb, model_flow, criterion, simple_model,
              final_layer_model, WordEmbedding_object,iter, logger=None):
+    #global args
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
@@ -306,15 +302,40 @@ def validate(val_loader, model_rgb, model_flow, criterion, simple_model,
 
     return top1.avg
 
+def define_ModelPaths():
+    model_paths_by_type_dictionary = {
+            'RGB':'./snapshots_model_RGB',
+            'Flow':'./snapshots_model_Flow',
+            'SimpleModel':'./snapshots_model_simple',
+            'FinalLayer':'./snapshots_model_finalLayer'
+            }
+    return model_paths_by_type_dictionary
 
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
-    filename = '_'.join((args.snapshot_pref, args.modality.lower(), filename))
-    torch.save(state, filename)
+def save_checkpoint(state, is_best, modality, filename='checkpoint.pth.tar'):
+    #global args
+    #Making directory if not found
+    for snapshot_path in list(model_paths_by_type_dictionary.values()):
+        if not os.path.isdir(snapshot_path):
+            os.makedirs(snapshot_path)
+    
+    FilePath = model_paths_by_type_dictionary[modality]        
+    filename = '_'.join(('model', modality.lower(), filename))
+    
+    torch.save(state, os.path.join(FilePath, filename))
     if is_best:
-        best_name = '_'.join((args.snapshot_pref, args.modality.lower(), 'model_best.pth.tar'))
-        shutil.copyfile(filename, best_name)
+        best_name = '_'.join(('model', modality.lower(), 'best.pth.tar'))
+        shutil.copyfile(os.path.join(FilePath, filename), os.path.join(FilePath, best_name))
 
-
+def load_checkpoint(model, filename='checkpoint.pth.tar'):
+    global best_prec1
+    modality = model.modality
+    FilePath = model_paths_by_type_dictionary[modality]
+    filename = '_'.join(('model', modality.lower(), filename))
+    checkpoint = torch.load(os.path.join(FilePath, filename))
+    args.start_epoch = checkpoint['epoch']
+    best_prec1 = checkpoint['best_prec1']
+    model.load_state_dict(checkpoint['state_dict'])
+    
 class AverageMeter(object):
     """Computes and stores the average and current value"""
     def __init__(self):
@@ -334,6 +355,7 @@ class AverageMeter(object):
 
 
 def adjust_learning_rate(optimizer, epoch, lr_steps):
+    #global args
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
     decay = 0.1 ** (sum(epoch >= np.array(lr_steps)))
     lr = args.lr * decay
@@ -359,6 +381,7 @@ def accuracy(output, target, topk=(1,)):
     return res
 
 def create_transforms_dictionary(*argv,mode = 'train'):
+    #global args
     dictionary = {}
     for model in argv:
         crop_size = model.crop_size
@@ -392,6 +415,7 @@ def create_transforms_dictionary(*argv,mode = 'train'):
     return dictionary
 
 def get_model_components(modality):
+    #global args
     model = TSN(num_segments = 3, modality = modality,
                 base_model=args.arch,
                 consensus_type=args.consensus_type, partial_bn=not args.no_partialbn)
@@ -424,6 +448,7 @@ def create_word_embedding_object(filename, embedding_file):
     dataframe = read_file(filename)
     series = dataframe['question']
     return WordEmbedding(series, embedding_file)
+    
 
 if __name__ == '__main__':
     main()
