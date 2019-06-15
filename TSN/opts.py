@@ -7,12 +7,16 @@ Definite compulsary ones
 1. train_QA (csv file)
 2. test_QA (csv file)
 3. SoftmaxIndex
-4. frames_path (where one folder for 1 video)
-5. optical_flow_path (where one folder for 1 video)
+
 6. word_embedding_file_path (txt file)
 7. test_train_combined_file (for vocabulary for glove vectors loading)
 
 Optional ones
+1. QA_file_directory
+2. data_directory
+3. word_embedding_directory
+4. frames_path
+5. optical_flow_path
 
 The ones to modify
 1. resume
@@ -20,22 +24,36 @@ The ones to modify
 The ones we have to delete
 1. modality
 2. dataset
+3. train_list
+4. val_list
+5. Dropout for now
+6. Snapshot prefix
+7. Flow prefix
 """
 
 parser = argparse.ArgumentParser(description="PyTorch implementation of Temporal Segment Networks")
-
-parser.add_argument('train_list', type=str)
-parser.add_argument('val_list', type=str)
+parser.add_argument('train_QA', type=str, help = 'train file name')
+parser.add_argument('test_QA', type=str, help = 'test file name')
+parser.add_argument('test_train_combined_file', type=str, help = 'test_train_combined_file file name')
+parser.add_argument('SoftmaxIndex', type=str, help = 'SoftmaxIndex file name')
+parser.add_argument('word_embedding_file_path', type=str, help = 'word_embedding_file_path')
 
 # ========================= Model Configs ==========================
+#defining the directories, keeping default values
+parser.add_argument('--qa_directory', type=str, default="../QA_generation")
+parser.add_argument('--data_directory', type=str, default="../Data")
+parser.add_argument('--word_embedding_directory', type=str, default="../word_embedding")
+parser.add_argument('--frames_path', type=str, default="Frames")
+parser.add_argument('--optical_flow_path', type=str, default="Optical_Flow")
+#end define directories
 parser.add_argument('--arch', type=str, default="resnet101")
 parser.add_argument('--num_segments', type=int, default=3)
 parser.add_argument('--consensus_type', type=str, default='avg',
                     choices=['avg', 'max', 'topk', 'identity', 'rnn', 'cnn'])
 parser.add_argument('--k', type=int, default=3)
 
-parser.add_argument('--dropout', '--do', default=0.5, type=float,
-                    metavar='DO', help='dropout ratio (default: 0.5)')
+#parser.add_argument('--dropout', '--do', default=0.5, type=float,
+#                    metavar='DO', help='dropout ratio (default: 0.5)')
 parser.add_argument('--loss_type', type=str, default="nll",
                     choices=['nll'])
 
@@ -72,11 +90,10 @@ parser.add_argument('--resume', action = 'store_true',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
-parser.add_argument('--snapshot_pref', type=str, default="")
+
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('--gpus', nargs='+', type=int, default=None)
-parser.add_argument('--flow_prefix', default="", type=str)
 
 
 
