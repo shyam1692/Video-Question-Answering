@@ -316,6 +316,7 @@ We can later make it compatible according to the model used.
 class SimpleLinear(torch.nn.Module):
     def __init__(self):
         super(SimpleLinear, self).__init__()
+        self.modality = 'SimpleModel'
         self.features = torch.nn.Sequential(
                 torch.nn.Linear(2048, 300)
                 )
@@ -326,6 +327,7 @@ class SimpleLinear(torch.nn.Module):
 class FinalLayer(torch.nn.Module):
     def __init__(self):
         super(FinalLayer, self).__init__()
+        self.modality = 'FinalLayer'
         self.features = torch.nn.Sequential(
                 torch.nn.Linear(300, 156),
                 torch.nn.Linear(156, 156),
