@@ -28,14 +28,20 @@ def main():
     args = parser.parse_args()
     #args will contain filenames- trainsegment, testsegment, frames path, optical flow path
     #softmaxindex filename
-    train_QA = read_file(args.train_QA)
-    test_QA = read_file(args.test_QA)
-    SoftmaxIndex = read_file(args.SoftmaxIndex)
+    
+    #Defining directories
+    qa_directory = args.qa_directory
+    data_directory = args.data_directory
+    word_embedding_directory = args.word_embedding_directory
+    
+    train_QA = read_file(os.path.join(qa_directory, args.train_QA))
+    test_QA = read_file(os.path.join(qa_directory, args.test_QA))
+    SoftmaxIndex = read_file(os.path.join(qa_directory, args.SoftmaxIndex))
     #path files
-    frames_path = args.frames_path
-    optical_flow_path = args.optical_flow_path
-    word_embedding_file_path = args.word_embedding_file_path
-    test_train_combined_file = args.test_train_combined_file
+    frames_path = os.path.join(data_directory, args.frames_path)
+    optical_flow_path = os.path.join(data_directory, args.optical_flow_path)
+    word_embedding_file_path = os.path.join(word_embedding_directory,args.word_embedding_file_path)
+    test_train_combined_file = os.path.join(qa_directory,args.test_train_combined_file)
         
     #create 2 models, one for RGB, one for optical flow
     #optimizers for each model
