@@ -1,7 +1,29 @@
 import argparse
+
+"""Let's decide on compulsary positional arguments and optional arguments"""
+"""
+Definite compulsary ones
+
+1. train_QA (csv file)
+2. test_QA (csv file)
+3. SoftmaxIndex
+4. frames_path (where one folder for 1 video)
+5. optical_flow_path (where one folder for 1 video)
+6. word_embedding_file_path (txt file)
+7. test_train_combined_file (for vocabulary for glove vectors loading)
+
+Optional ones
+
+The ones to modify
+1. resume
+
+The ones we have to delete
+1. modality
+2. dataset
+"""
+
 parser = argparse.ArgumentParser(description="PyTorch implementation of Temporal Segment Networks")
-parser.add_argument('dataset', type=str, choices=['ucf101', 'hmdb51', 'kinetics'])
-parser.add_argument('modality', type=str, choices=['RGB', 'Flow', 'RGBDiff'])
+
 parser.add_argument('train_list', type=str)
 parser.add_argument('val_list', type=str)
 
@@ -44,7 +66,9 @@ parser.add_argument('--eval-freq', '-ef', default=5, type=int,
 # ========================= Runtime Configs ==========================
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--resume', default='', type=str, metavar='PATH',
+#parser.add_argument('--resume', default='', type=str, metavar='PATH',
+                    #help='path to latest checkpoint (default: none)')
+parser.add_argument('--resume', action = 'store_true',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
