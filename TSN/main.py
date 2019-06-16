@@ -53,7 +53,9 @@ def main():
     model_rgb, policies_rgb = get_model_components(modality = 'RGB')
     model_flow, policies_flow = get_model_components(modality = 'Flow')    
     simple_model = SimpleLinear()
+    simple_model = convert_to_cuda(simple_model)
     final_layer_model = FinalLayer()
+    final_layer_model = convert_to_cuda(final_layer_model)
 
     if args.resume:
         for model in [model_rgb, model_flow, simple_model, final_layer_model]:
@@ -68,6 +70,7 @@ def main():
     transforms_train_dictionary = create_transforms_dictionary(model_rgb, model_flow, mode = 'train')
     transforms_test_dictionary = create_transforms_dictionary(model_rgb, model_flow, mode = 'test')
     
+    print('Defining Data loader')
     train_loader = torch.utils.data.DataLoader(
     TSNDataSet( root_path = None, num_segments=3,
                frames_path = frames_path , optical_flow_path = optical_flow_path, 
@@ -89,7 +92,7 @@ def main():
     batch_size=args.batch_size, shuffle=True,
     num_workers=args.workers, pin_memory=True)
     
-
+    print('Models and Data loaders defined')
     # define loss function (criterion) and optimizer
     if args.loss_type == 'nll':
         criterion = torch.nn.CrossEntropyLoss().cuda()
@@ -127,16 +130,21 @@ def main():
                                 lr = args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
-    
+
+    print('Optimizers defined')    
     """Creating word embedding object"""
     WordEmbedding_object = create_word_embedding_object(test_train_combined_file, word_embedding_file_path)
     
+    print('Word Embedding Object defined')
     if args.evaluate:
         validate(val_loader, model_rgb, model_flow, criterion, simple_model,
              final_layer_model, WordEmbedding_object, 0)
         return
 
+    print('Start Training')
     for epoch in range(args.start_epoch, args.epochs):
+        print('Epoch in progress')
+        print(epoch)
         adjust_learning_rate(optimizer_rgb, epoch, args.lr_steps)
         adjust_learning_rate(optimizer_flow, epoch, args.lr_steps)
 
@@ -163,7 +171,7 @@ def main():
                     'state_dict': model.state_dict(),
                     'best_prec1': best_prec1,
                 }, is_best
-                , model.modality)
+                , model.module.modality)
 
 #Right now, we haven't yet computer feature embeddings. We will focus on that later, first we will compute losses.
 def train(train_loader, model_rgb, model_flow, criterion, optimizer_rgb, 
@@ -194,9 +202,11 @@ def train(train_loader, model_rgb, model_flow, criterion, optimizer_rgb,
         # measure data loading time
         data_time.update(time.time() - end)
 
-        target = target.cuda(async=True)
+        #target = target.cuda(async=True)
+        target = target.cuda()
         #Calling word embedding object to convert questions to glove vector tensors
         QuestionEmbeddings = WordEmbedding_object(input_questions)
+        QuestionEmbeddings = QuestionEmbeddings.cuda()
         #Do autograd transformation
         autograd_transform(input_rgb)
         autograd_transform(input_flow)
@@ -216,9 +226,9 @@ def train(train_loader, model_rgb, model_flow, criterion, optimizer_rgb,
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output.data, target, topk=(1,5))
-        losses.update(loss.data[0], input.size(0))
-        top1.update(prec1[0], input.size(0))
-        top5.update(prec5[0], input.size(0))
+        losses.update(loss.data, input_rgb.size(0))
+        top1.update(prec1.data, input_rgb.size(0))
+        top5.update(prec5.data, input_rgb.size(0))
 
 
         # compute gradient and do SGD step
@@ -268,9 +278,10 @@ def validate(val_loader, model_rgb, model_flow, criterion, simple_model,
 
     end = time.time()
     for i, (input_questions,input_rgb, input_flow, target) in enumerate(val_loader):
-        target = target.cuda(async=True)
+        target = target.cuda()
+        #target = target.cuda(async=True)
         QuestionEmbeddings = WordEmbedding_object(input_questions)
-
+        QuestionEmbeddings = QuestionEmbeddings.cuda()
         #Do autograd transformation
         autograd_transform(input_rgb)
         autograd_transform(input_flow)
@@ -286,9 +297,9 @@ def validate(val_loader, model_rgb, model_flow, criterion, simple_model,
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output.data, target, topk=(1,5))
 
-        losses.update(loss.data[0], input.size(0))
-        top1.update(prec1[0], input.size(0))
-        top5.update(prec5[0], input.size(0))
+        losses.update(loss.data, input_rgb.size(0))
+        top1.update(prec1.data, input_rgb.size(0))
+        top5.update(prec5.data, input_rgb.size(0))
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -334,7 +345,7 @@ def save_checkpoint(state, is_best, modality, filename='checkpoint.pth.tar'):
 
 def load_checkpoint(model, filename='checkpoint.pth.tar'):
     global best_prec1
-    modality = model.modality
+    modality = model.module.modality
     FilePath = model_paths_by_type_dictionary[modality]
     filename = '_'.join(('model', modality.lower(), filename))
     checkpoint = torch.load(os.path.join(FilePath, filename))
@@ -390,35 +401,38 @@ def create_transforms_dictionary(*argv,mode = 'train'):
     #global args
     dictionary = {}
     for model in argv:
-        crop_size = model.crop_size
-        scale_size = model.scale_size
-        input_mean = model.input_mean
-        input_std = model.input_std
+        crop_size = model.module.crop_size
+        scale_size = model.module.scale_size
+        input_mean = model.module.input_mean
+        input_std = model.module.input_std
         #policies = model.get_optim_policies()
-        train_augmentation = model.get_augmentation()     
+        train_augmentation = model.module.get_augmentation()     
     # Data loading code
-        if model.modality != 'RGBDiff':
+        if model.module.modality != 'RGBDiff':
             normalize = GroupNormalize(input_mean, input_std)
         else:
             normalize = IdentityTransform()     
         if mode == 'train':
             transform=torchvision.transforms.Compose([
                            train_augmentation,
-                           Stack(roll=model.arch == 'BNInception'),
-                           ToTorchFormatTensor(div=model.arch != 'BNInception'),
+                           Stack(roll=model.module.arch == 'BNInception'),
+                           ToTorchFormatTensor(div=model.module.arch != 'BNInception'),
                            normalize,
                        ])
         else:
             transform=torchvision.transforms.Compose([
                        GroupScale(int(scale_size)),
                        GroupCenterCrop(crop_size),
-                       Stack(roll=model.arch == 'BNInception'),
+                       Stack(roll=model.module.arch == 'BNInception'),
                        ToTorchFormatTensor(div=args.arch != 'BNInception'),
                        normalize,
                    ])
     
-        dictionary[model.modality] = transform
+        dictionary[model.module.modality] = transform
     return dictionary
+
+def convert_to_cuda(model):
+    return torch.nn.DataParallel(model, device_ids=args.gpus).cuda()
 
 def get_model_components(modality):
     #global args
@@ -427,7 +441,8 @@ def get_model_components(modality):
                 consensus_type=args.consensus_type, partial_bn=not args.no_partialbn)
     
     policies = model.get_optim_policies()
-    model = torch.nn.DataParallel(model, device_ids=args.gpus).cuda()    
+    #model = torch.nn.DataParallel(model, device_ids=args.gpus).cuda()    
+    model = convert_to_cuda(model)
     return model, policies
 
 def read_file(filename):
