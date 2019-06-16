@@ -46,7 +46,7 @@ parser.add_argument('--word_embedding_directory', type=str, default="../word_emb
 parser.add_argument('--frames_path', type=str, default="Frames")
 parser.add_argument('--optical_flow_path', type=str, default="Optical_Flow")
 #end define directories
-parser.add_argument('--arch', type=str, default="resnet101")
+parser.add_argument('--arch', type=str, default="resnet18")
 parser.add_argument('--num_segments', type=int, default=3)
 parser.add_argument('--consensus_type', type=str, default='avg',
                     choices=['avg', 'max', 'topk', 'identity', 'rnn', 'cnn'])
