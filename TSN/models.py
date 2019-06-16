@@ -9,7 +9,7 @@ from torch.nn.init import normal, constant
 
 class TSN(nn.Module):
     def __init__(self,  num_segments, modality,
-                 base_model='resnet101', new_length=None,
+                 base_model='resnet18', new_length=None,
                  consensus_type='avg',
                  crop_num=1, partial_bn=True):
         super(TSN, self).__init__()
@@ -310,7 +310,7 @@ TSN Configurations:
 
 
 """
-If our model type is resnet, input dimension will be 2048, right now hard coded.
+If our model type is resnet18, input dimension will be 512, right now hard coded.
 We can later make it compatible according to the model used.
 """
 class SimpleLinear(torch.nn.Module):
@@ -318,7 +318,7 @@ class SimpleLinear(torch.nn.Module):
         super(SimpleLinear, self).__init__()
         self.modality = 'SimpleModel'
         self.features = torch.nn.Sequential(
-                torch.nn.Linear(2048, 300)
+                torch.nn.Linear(512, 300)
                 )
     def forward(self, x):
         return self.features(x)
